@@ -9,27 +9,25 @@ import time
 
 class HockeyReference:
 
-    def __init__(self, date_range_start, date_range_end):
+    def __init__(self):
 
         # initialize object variables
-        self.date_range_start = date_range_start
-        self.date_range_end = date_range_end
         self.df = None
         self.title = None
         self.url = None
 
-    def daily_leaders_skaters(self):
+    def daily_activity_skaters(self, date_range_start, date_range_end):
 
         # give the object a title
         self.title = 'Skaters'
 
         # set the date to extract before entering the loop
-        date_extract = self.date_range_start
+        date_extract = date_range_start
 
         # set a flag to indicate whether the loop has completed at least once
         flag_loop = False
 
-        while date_extract <= self.date_range_end:
+        while date_extract <= date_range_end:
 
             # generate the hockey-reference url
             stats_month = date_extract.strftime('%m')
@@ -76,7 +74,8 @@ class HockeyReference:
                 # index the skaters DataFrame by Date and Player ID and sort by the index
                 df_concat.set_index(['Date','Player ID'],inplace=True, drop=True)
                 df_concat.sort_index(axis=0, inplace=True, ascending=True)
-                
+
+                # append the current DataFrame to the object DataFrame
                 if flag_loop:
                     self.df = pd.concat([self.df, df_concat], axis=0)
                 else:
@@ -87,18 +86,18 @@ class HockeyReference:
             date_extract = date_extract + datetime.timedelta(days=1)
             time.sleep(3)
 
-    def daily_leaders_goalies(self):
+    def daily_activity_goalies(self, date_range_start, date_range_end):
 
         # give the object a title
         self.title = 'Goalies'
 
         # set the date to extract before entering the loop
-        date_extract = self.date_range_start
+        date_extract = date_range_start
 
         # set a flag to indicate whether the loop has completed at least once
         flag_loop = False
 
-        while date_extract <= self.date_range_end:
+        while date_extract <= date_range_end:
 
             # generate the hockey-reference url
             stats_month = date_extract.strftime('%m')
@@ -147,6 +146,7 @@ class HockeyReference:
                 df_concat.set_index(['Date', 'Player ID'], inplace=True, drop=True)
                 df_concat.sort_index(axis=0, inplace=True, ascending=True)
 
+                # append the current DataFrame to the object DataFrame
                 if flag_loop:
                     self.df = pd.concat([self.df, df_concat], axis=0)
                 else:
@@ -157,6 +157,86 @@ class HockeyReference:
             date_extract = date_extract + datetime.timedelta(days=1)
             time.sleep(3)
 
+    def team_rosters(self, date_year):
+
+        # give the object a title
+        self.title = 'Rosters'
+
+        # list of teams to scrape
+        list_teams = ['ANA', 'ARI', 'BOS', 'BUF', 'CAR', 'CBJ', 'CGY', 'CHI', 'COL', 'DAL', 'DET', 'EDM', 'FLA', 'LAK',
+                      'MIN', 'MTL', 'NJD', 'NSH', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SJS', 'STL', 'TBL', 'TOR', 'VAN',
+                      'VEG', 'WPG', 'WSH']
+
+        # set a flag to indicate whether the loop has completed at least once
+        flag_loop = False
+
+        for team_id in list_teams:
+
+            # generate the hockey reference url
+            stats_webpage = 'https://www.hockey-reference.com/teams/{}/{}.html'.format(team_id, date_year)
+
+            # create the soup object
+            r = requests.get(stats_webpage)
+            html_doc = r.text
+            soup = BeautifulSoup(html_doc, 'html.parser')
+
+            # get all records from the rosters table
+            roster_table = soup.find(id='roster').find_all('td')
+            roster_tbody = [cell.get_text() for cell in roster_table]
+            roster_records = [tuple(roster_tbody[row: row + 12]) for row in range(0, len(roster_tbody), 12)]
+
+            # make a list of player jersey numbers
+            player_number_table = soup.find(id='roster').find_all('th', {'data-stat': 'number'})
+            player_number_list = [cell.get_text() for cell in player_number_table]
+            del player_number_list[0]
+
+            # make a list of player IDs
+            player_id_list = []
+
+            for player_id in range(len(roster_table)):
+                try:
+                    player_id_list.append(roster_table[player_id]['data-append-csv'])
+                except:
+                    pass
+
+            # load the rosters data into a Pandas DataFrame
+            columns_list = ['Player', 'Flag', 'Position', 'Age', 'Height', 'Weight', 'Shoots/Catches',
+                            'Years Experience', 'Birth Date', 'Summary', 'Salary', 'Draft']
+            df_roster = pd.DataFrame.from_records(roster_records, columns=columns_list)
+
+            # concatenate the Player IDs and jersey numbers to the skaters DataFrame
+            df_player_number = pd.DataFrame(player_number_list, columns=['Number'])
+            df_player_id = pd.DataFrame(player_id_list, columns=['Player ID'])
+            df_concat = pd.concat([df_player_id, df_player_number, df_roster], axis=1)
+
+            # delete the summary column
+            del df_concat['Summary']
+
+            # set the index to player ID
+            df_concat.set_index('Player ID', drop=True, inplace=True)
+
+            # add a column showing team name
+            df_concat['Team'] = team_id
+
+            # re-arrange the column positions
+            df_concat = df_concat[['Player', 'Team', 'Number', 'Flag', 'Position', 'Age', 'Height', 'Weight', 'Shoots/Catches',
+                                   'Years Experience', 'Birth Date', 'Salary', 'Draft']]
+
+            # perform string operations on several columns
+            df_concat['Flag'] = df_concat['Flag'].str.upper()
+            df_concat['Salary'] = df_concat['Salary'].apply(lambda x: x.replace('$', '')).apply(
+                lambda x: x.replace(',', ''))
+            df_concat['Shoots/Catches'] = df_concat['Shoots/Catches'].apply(lambda x: 'L' if 'L' in x else 'R')
+
+            # append the current DataFrame to the object DataFrame
+            if flag_loop:
+                self.df = pd.concat([self.df, df_concat], axis=0)
+            else:
+                self.df = df_concat
+                flag_loop = True
+
+            time.sleep(3)
+
     def output_csv(self, dir_csv):
 
         # create a new directory if it does not already exist
@@ -164,7 +244,7 @@ class HockeyReference:
             os.mkdir(dir_csv)
 
         # write the DataFrame to a csv in the specified directory
-        filename_csv = '{:%Y-%m-%d} {}.csv'.format(self.date_range_start, self.title)
+        filename_csv = '{:%Y-%m-%d} {}.csv'.format(date_range_start, self.title)
         path_csv = os.path.join(dir_csv, filename_csv)
         self.df.to_csv(path_csv)
 
@@ -173,13 +253,20 @@ class HockeyReference:
 dir_csv = os.path.join(os.getcwd(), 'csv')
 
 # define the range of dates to extract
-date_range_start = datetime.datetime(2017, 10, 4)
+date_range_start = datetime.datetime(2017, 10, 5)
 date_range_end = datetime.datetime(2017, 10, 6)
+date_year = 2018
 
-s = HockeyReference(date_range_start, date_range_end)
-s.daily_leaders_skaters()
+r = HockeyReference()
+r.team_rosters(date_year)
+r.output_csv(dir_csv)
+
+"""
+s = HockeyReference()
+s.daily_activity_skaters(date_range_start, date_range_end)
 s.output_csv(dir_csv)
 
-g = HockeyReference(date_range_start, date_range_end)
-g.daily_leaders_goalies()
+g = HockeyReference()
+g.daily_activity_goalies(date_range_start, date_range_end)
 g.output_csv(dir_csv)
+"""
